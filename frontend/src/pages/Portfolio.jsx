@@ -358,7 +358,7 @@ export default function Portfolio() {
       <div className="card card-elevated" style={{ marginBottom: 32 }}>
         <h3>Add New Stock</h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 8, marginBottom: 16 }}>
-          Choose from watchlist or search. Live price auto-fills. Use "Total Paid" to auto-calculate average buy price.
+          Choose from watchlist or search. Live price auto-fills average buy when you pick a symbol.
         </p>
 
         <div style={{ marginBottom: 16 }}>
@@ -434,7 +434,17 @@ export default function Portfolio() {
           <input className="input" placeholder="Company Name (optional)" value={assetName} onChange={(e) => setAssetName(e.target.value)} />
           <input type="number" className="input" placeholder="Quantity" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           <input type="number" step="0.01" className="input" placeholder="Avg Buy Price" value={purchasePrice} onChange={(e) => { setPurchasePrice(e.target.value); setAvgManual(true); }} />
-          <input type="number" step="0.01" className="input" placeholder="Total Paid (optional)" value={totalPaid} onChange={(e) => setTotalPaid(e.target.value)} />
+          <input
+            type="number"
+            step="0.01"
+            className="input"
+            placeholder="Total Paid (optional)"
+            value={totalPaid}
+            onChange={(e) => setTotalPaid(e.target.value)}
+            aria-hidden={true}
+            tabIndex={-1}
+            style={{ display: 'none' }}
+          />
           
           <button className="btn btn-primary" onClick={handleAddStock} disabled={adding || !symbol || !quantity || !purchasePrice} style={{ height: 44 }}>
             <Plus size={18} /> {adding ? 'Adding...' : 'Add'}
@@ -603,6 +613,9 @@ export default function Portfolio() {
                                   onClick={() => startEdit(h)}
                                   disabled={busy || (editForm != null && editForm.id !== h.id)}
                                   title="Edit"
+                                  aria-hidden={true}
+                                  tabIndex={-1}
+                                  style={{ display: 'none' }}
                                 >
                                   <Pencil size={16} />
                                 </button>
