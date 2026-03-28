@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { POPULAR_TICKERS } = require("../constants/popularTickers");
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || "d73ns7pr01qjjol3m9l0d73ns7pr01qjjol3m9lg";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
@@ -44,9 +45,9 @@ const getCandles = async (req, res) => {
   }
 };
 
-// GET /api/market/watchlist - batch quotes for popular symbols
+// GET /api/market/watchlist - batch quotes for popular symbols (same list as /api/research/companies-overview)
 const getWatchlist = async (req, res) => {
-  const symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", "AMD", "INTC"];
+  const symbols = POPULAR_TICKERS;
   try {
     const results = await Promise.all(
       symbols.map((sym) =>

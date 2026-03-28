@@ -42,11 +42,18 @@ export const deleteHolding = (portfolioId, holdingId) =>
 export const deletePortfolio = (id) => API.delete(`/portfolio/${id}`);
 
 // ====================== RESEARCH ======================
-export const getNews = (params) => API.get('/research/news', { params });
+export const getNews = (params) =>
+  API.get('/research/news', {
+    params,
+    timeout: params?.category === 'all' ? 60000 : 15000,
+  });
 export const getMarketSentiment = () => API.get('/research/market-sentiment');
 export const getSectorPerformance = () => API.get('/research/sector-performance');   // ← Added
 export const getAssets = () => API.get('/research/assets');
 export const getAssetByTicker = (ticker) => API.get(`/research/assets/${ticker}`);
+/** All POPULAR_TICKERS with quote + profile + optional news. Use newsLimit: 0 for dropdown index only (no news fetch). */
+export const getCompaniesWithNews = (params) =>
+  API.get('/research/companies-overview', { params, timeout: 90000 });
 
 // ====================== MARKET ======================
 export const getQuote = (symbol) => API.get(`/market/quote/${symbol}`);

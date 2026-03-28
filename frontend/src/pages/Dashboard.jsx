@@ -1,260 +1,553 @@
-import { useEffect, useState } from 'react';
-import { getWatchlist, getMarketSentiment, getNews } from '../api';
-import StockCard from '../components/StockCard';
+import { useEffect, useMemo, useState } from 'react';
+import { getCompaniesWithNews } from '../api';
 import NewsCard from '../components/NewsCard';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { TrendingUp, Newspaper, BarChart2, Wifi } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, Tooltip, XAxis } from 'recharts';
+import {
+  Building2,
+  Globe,
+  LineChart,
+  Newspaper,
+  Search,
+  Sparkles,
+  TrendingUp,
+} from 'lucide-react';
+
+const NEWS_PER_STOCK = 8;
+const ROW_PANEL_MAX = 'min(56vh, 520px)';
+
+function formatCap(n, currency = 'USD') {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  let cap = Number(n);
+  if (cap > 0 && cap < 1e12) cap *= 1e6;
+  const mult = cap >= 1e12 ? [1e12, 'T'] : cap >= 1e9 ? [1e9, 'B'] : cap >= 1e6 ? [1e6, 'M'] : [1, ''];
+  const v = cap / mult[0];
+  return `${v < 10 ? v.toFixed(2) : v.toFixed(1)}${mult[1]} ${currency}`;
+}
+
+function formatPrice(c, currency) {
+  if (c == null || c === 0) return '—';
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency || 'USD',
+      maximumFractionDigits: 2,
+    }).format(c);
+  } catch {
+    return `${c}`;
+  }
+}
+
+/** Turn API payload into plain-language notes (education only, not advice). */
+function buildThesis({ quote, profile, sentiment, localData }, opts = {}) {
+  const compact = opts.compact === true;
+  const maxDesc = compact ? 280 : 520;
+  const bullets = [];
+  const name = profile?.name || profile?.ticker || 'This company';
+  const industry = profile?.finnhubIndustry;
+  const country = profile?.country;
+  const description = (profile?.description || '').trim();
+
+  if (description) {
+    const short =
+      description.length > maxDesc ? `${description.slice(0, maxDesc).trim()}…` : description;
+    bullets.push({
+      title: 'What they do',
+      body: short,
+      icon: 'building',
+    });
+  }
+
+  if (industry) {
+    bullets.push({
+      title: 'Sector positioning',
+      body: `${name} operates in ${industry}${
+        country ? ` (${country})` : ''
+      }. Understanding the sector helps you compare peers and growth drivers.`,
+      icon: 'globe',
+    });
+  }
+
+  const dp = quote?.dp;
+  const d = quote?.d;
+  if (dp != null && typeof dp === 'number') {
+    const direction = dp >= 0 ? 'up' : 'down';
+    bullets.push({
+      title: 'Recent price action',
+      body: `The stock is ${direction} about ${Math.abs(dp).toFixed(2)}% vs prior close${
+        d != null ? ` (${d >= 0 ? '+' : ''}${d.toFixed(2)} on the day)` : ''
+      }. Traders often pair short-term moves with fundamentals and news.`,
+      icon: 'chart',
+    });
+  }
+
+  const bull = sentiment?.sentiment?.bullishPercent;
+  const bear = sentiment?.sentiment?.bearishPercent;
+  const buzz = sentiment?.buzz;
+  const score = sentiment?.companyNewsScore;
+  if (bull != null && bear != null) {
+    bullets.push({
+      title: 'News flow (company headlines)',
+      body: `Finnhub sentiment on recent headlines: roughly ${Number(bull).toFixed(0)}% tagged bullish vs ${Number(
+        bear
+      ).toFixed(0)}% bearish.${
+        score != null
+          ? ` Aggregate news score for the symbol is ${Number(score).toFixed(3)} (scale varies by provider).`
+          : ''
+      }${
+        buzz?.articlesInLastWeek
+          ? ` About ${buzz.articlesInLastWeek} articles mentioned the stock in the last week.`
+          : ''
+      }`,
+      icon: 'news',
+    });
+  }
+
+  if (localData?.esg_score != null) {
+    bullets.push({
+      title: 'ESG (from your research DB)',
+      body: `Recorded ESG score: ${localData.esg_score}. Higher scores are often used as a sustainability lens—not a buy signal by itself.`,
+      icon: 'sparkle',
+    });
+  }
+
+  if (!bullets.length) {
+    bullets.push({
+      title: 'Snapshot',
+      body: 'Profile data was limited for this name—use the quote row and related headlines beside it.',
+      icon: 'sparkle',
+    });
+  }
+
+  bullets.push({
+    title: 'Not financial advice',
+    body:
+      'HackTrix surfaces data to help you learn. Always verify filings, risk, and your own goals before investing.',
+    icon: 'sparkle',
+  });
+
+  return bullets;
+}
+
+function iconFor(key) {
+  const s = { color: 'var(--accent-blue)' };
+  const sz = 16;
+  if (key === 'building') return <Building2 size={sz} style={s} />;
+  if (key === 'globe') return <Globe size={sz} style={s} />;
+  if (key === 'chart') return <LineChart size={sz} style={s} />;
+  if (key === 'news') return <Newspaper size={sz} style={s} />;
+  return <Sparkles size={sz} style={s} />;
+}
+
+function CompanyRow({ company, rowIndex, highlighted }) {
+  const newsFirst = rowIndex % 2 === 1;
+  const quote = company.quote || {};
+  const prof = company.profile || {};
+  const currency = company.currency || prof.currency || 'USD';
+  const thesis = buildThesis(
+    {
+      quote,
+      profile: {
+        ...prof,
+        name: company.name || prof.name,
+        exchange: company.exchange,
+      },
+      sentiment: {},
+      localData: null,
+    },
+    { compact: true }
+  );
+
+  const newsList = Array.isArray(company.news)
+    ? [...company.news].sort((a, b) => (b.datetime || 0) - (a.datetime || 0)).slice(0, NEWS_PER_STOCK)
+    : [];
+
+  const stockCard = (
+    <div
+      className="card"
+      style={{
+        padding: 0,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        maxHeight: ROW_PANEL_MAX,
+        minHeight: 280,
+      }}
+    >
+      <div
+        style={{
+          padding: '14px 16px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          gap: 12,
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        {prof.logo && (
+          <img
+            src={prof.logo}
+            alt=""
+            style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'contain', background: '#fff' }}
+            onError={(e) => {
+              e.target.style.display = 'none';
+            }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>
+            {company.exchange || '—'} · {company.symbol}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginTop: 2, lineHeight: 1.25 }}>
+            {company.name || company.symbol}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
+            <div>
+              <div className="stat-label" style={{ fontSize: 10 }}>Last</div>
+              <div className="stat-value" style={{ fontSize: 16, marginTop: 2 }}>{formatPrice(quote.c, currency)}</div>
+            </div>
+            <div>
+              <div className="stat-label" style={{ fontSize: 10 }}>Chg</div>
+              <div
+                className="stat-value"
+                style={{
+                  fontSize: 16,
+                  marginTop: 2,
+                  color: (quote.dp || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+                }}
+              >
+                {quote.d != null ? `${quote.d >= 0 ? '+' : ''}${quote.d.toFixed(2)}` : '—'}{' '}
+                {quote.dp != null ? `(${quote.dp >= 0 ? '+' : ''}${quote.dp.toFixed(2)}%)` : ''}
+              </div>
+            </div>
+            <div>
+              <div className="stat-label" style={{ fontSize: 10 }}>Mkt cap</div>
+              <div className="stat-value" style={{ fontSize: 16, marginTop: 2 }}>
+                {formatCap(prof.marketCapitalization, currency)}
+              </div>
+            </div>
+          </div>
+          {prof.weburl && (
+            <a
+              href={prof.weburl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 12, marginTop: 6, display: 'inline-block', color: 'var(--accent-blue)' }}
+            >
+              Website →
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div style={{ padding: '12px 16px 14px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 8,
+            color: 'var(--text-primary)',
+            fontWeight: 600,
+            fontSize: 14,
+            flexShrink: 0,
+          }}
+        >
+          <TrendingUp size={16} />
+          Context
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.45, flexShrink: 0 }}>
+          From your overview API—not a buy/sell recommendation.
+        </p>
+        <div
+          style={{
+            overflowY: 'auto',
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            paddingRight: 4,
+          }}
+        >
+          {thesis.map((t, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                gap: 10,
+                padding: '10px 11px',
+                borderRadius: 10,
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  background: 'var(--accent-blue)18',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {iconFor(t.icon)}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>{t.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{t.body}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const newsCard = (
+    <div
+      className="card"
+      style={{
+        padding: 0,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        maxHeight: ROW_PANEL_MAX,
+        minHeight: 280,
+      }}
+    >
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+          <Newspaper size={16} />
+          Latest: {company.symbol}
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.45, marginBottom: 0 }}>
+          Company headlines for this ticker (newest first).
+        </p>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {newsList.length > 0 ? (
+          newsList.map((article) => <NewsCard key={`${company.symbol}-${article.id}`} article={article} compact />)
+        ) : (
+          <div style={{ padding: 16, color: 'var(--text-secondary)', fontSize: 13 }}>No company news for {company.symbol}.</div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      id={`dash-company-${company.symbol}`}
+      style={{
+        marginBottom: 28,
+        scrollMarginTop: 100,
+        borderRadius: 14,
+        transition: 'box-shadow 0.35s ease',
+        boxShadow: highlighted ? '0 0 0 2px var(--accent-blue), 0 8px 32px rgba(63, 142, 245, 0.15)' : undefined,
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          gap: 16,
+          alignItems: 'stretch',
+        }}
+      >
+        <div style={{ order: newsFirst ? 2 : 1, minWidth: 0 }}>{stockCard}</div>
+        <div style={{ order: newsFirst ? 1 : 2, minWidth: 0 }}>{newsCard}</div>
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  const [watchlist, setWatchlist] = useState([]);
-  const [sentiment, setSentiment] = useState(null);
-  const [news, setNews] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchQ, setSearchQ] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [highlightedSymbol, setHighlightedSymbol] = useState(null);
 
-  useEffect(() => {
-    Promise.all([
-      getWatchlist(),
-      getMarketSentiment(),
-      getNews({ category: 'general' }),
-    ])
-      .then(([wl, sent, n]) => {
-        setWatchlist(wl?.data || []);
-        setSentiment(sent?.data || null);
-        setNews(n?.data?.slice(0, 4) || []);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getCompaniesWithNews({ newsLimit: NEWS_PER_STOCK })
+      .then((r) => {
+        if (cancelled) return;
+        const rows = r.data?.companies;
+        setCompanies(Array.isArray(rows) ? rows : []);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e?.response?.data?.message || e.message || 'Failed to load overview');
+          setCompanies([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const topMovers = [...watchlist]
-    .sort((a, b) => Math.abs(b.change_percent) - Math.abs(a.change_percent))
-    .slice(0, 4);
+  const suggestions = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!companies.length) return [];
+    if (!q) return companies;
+    return companies.filter(
+      (c) =>
+        c.symbol.toLowerCase().includes(q) ||
+        (c.name && String(c.name).toLowerCase().includes(q)) ||
+        (c.industry && String(c.industry).toLowerCase().includes(q))
+    );
+  }, [companies, searchQ]);
 
-  const mockPortfolioCurve = [
-    { x: 'Jan', v: 42000 }, { x: 'Feb', v: 44500 }, { x: 'Mar', v: 43000 },
-    { x: 'Apr', v: 47000 }, { x: 'May', v: 51000 }, { x: 'Jun', v: 49000 },
-    { x: 'Jul', v: 54000 }, { x: 'Aug', v: 58200 },
-  ];
+  useEffect(() => {
+    if (!searchOpen) return undefined;
+    const onDown = (e) => {
+      if (e.target.closest?.('[data-dash-search]')) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [searchOpen]);
 
-  // Helper to get change color
-  const getChangeColor = (change) => {
-    if (!change) return 'var(--text-secondary)';
-    return change.toString().includes('+') ? 'var(--accent-green)' : 'var(--accent-red)';
-  };
+  const goToCompany = (symbol) => {
+    const id = `dash-company-${symbol}`;
+    const el = document.getElementById(id);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setHighlightedSymbol(symbol);
+    window.setTimeout(() => setHighlightedSymbol((s) => (s === symbol ? null : s)), 2200);
+    setSearchQ('');
+    setSearchOpen(false);
+  };
 
-  return (
-    <div className="animate-in">
-      {/* Header */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 className="page-title">
-            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, 
-            {user?.name?.split(' ')[0] || 'Trader'} 👋
-          </h1>
-          <p className="page-subtitle">Here's your market overview for today</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--accent-green)' }}>
-          <span className="pulse-live" /> Live Market Data
-        </div>
-      </div>
+  return (
+    <div className="animate-in">
+      <div
+        className="page-header"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <div>
+          <h1 className="page-title">Stocks & company news</h1>
+          <p className="page-subtitle">
+            Rows alternate layout (stock · news, then news · stock). Jump to any company from search.
+          </p>
+        </div>
 
-      {/* Updated Stat Cards - Real Market Data Only */}
-      <div className="grid-4" style={{ marginBottom: 24 }}>
-        {[
-          {
-            label: 'Nifty 50',
-            value: sentiment?.nifty_value || '—',
-            change: sentiment?.nifty_change || '—',
-            icon: <TrendingUp size={18} />,
-            color: 'var(--accent-blue)'
-          },
-          {
-            label: 'Market Breadth',
-            value: `${sentiment?.advancers || '—'} : ${sentiment?.decliners || '—'}`,
-            change: 'Advancers : Decliners',
-            icon: <BarChart2 size={18} />,
-            color: 'var(--accent-green)'
-          },
-          {
-            label: 'News Articles',
-            value: sentiment?.total_articles_analyzed || '—',
-            change: 'Analyzed Today',
-            icon: <Newspaper size={18} />,
-            color: 'var(--accent-purple)'
-          },
-          {
-            label: 'India VIX',
-            value: sentiment?.vix_value || '—',
-            change: sentiment?.vix_change || '—',
-            icon: <Wifi size={18} />,
-            color: 'var(--accent-amber)'
-          },
-        ].map((stat) => (
-          <div key={stat.label} className="card" style={{ position: 'relative', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div className="stat-label">{stat.label}</div>
-                <div className="stat-value" style={{ marginTop: 8, fontSize: 22 }}>
-                  {stat.value}
-                </div>
-                <div 
-                  style={{ 
-                    marginTop: 4, 
-                    fontSize: 12, 
-                    color: getChangeColor(stat.change) 
-                  }}
-                >
-                  {stat.change}
-                </div>
-              </div>
-              <div 
-                style={{ 
-                  padding: 10, 
-                  borderRadius: 10, 
-                  background: `${stat.color}18`, 
-                  color: stat.color 
-                }}
-              >
-                {stat.icon}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+        {!loading && companies.length > 0 && (
+          <div data-dash-search style={{ position: 'relative', minWidth: 280, maxWidth: 400, width: '100%' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-secondary)',
+              }}
+            >
+              <Search size={16} color="var(--text-muted)" />
+              <input
+                placeholder="Search company or symbol…"
+                value={searchQ}
+                onChange={(e) => {
+                  setSearchQ(e.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+            </div>
+            {searchOpen && (
+              <div
+                className="card"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: '100%',
+                  marginTop: 6,
+                  zIndex: 30,
+                  padding: 8,
+                  maxHeight: 320,
+                  overflowY: 'auto',
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
+                }}
+              >
+                {suggestions.length === 0 ? (
+                  <div style={{ padding: 12, fontSize: 13, color: 'var(--text-muted)' }}>No match.</div>
+                ) : (
+                  suggestions.map((c) => (
+                    <button
+                      key={c.symbol}
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{
+                        width: '100%',
+                        justifyContent: 'flex-start',
+                        textAlign: 'left',
+                        marginBottom: 4,
+                        height: 'auto',
+                        padding: '8px 10px',
+                      }}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => goToCompany(c.symbol)}
+                    >
+                      <span style={{ fontWeight: 700, minWidth: 52 }}>{c.symbol}</span>
+                      <span style={{ color: 'var(--text-secondary)', marginLeft: 8, fontSize: 12, flex: 1 }}>
+                        {c.name}
+                        {c.industry ? (
+                          <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 11 }}>{c.industry}</span>
+                        ) : null}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 24 }}>
-        {/* Portfolio Performance Chart */}
-        <div className="card">
-          <div style={{ fontWeight: 600, marginBottom: 16, color: 'var(--text-primary)' }}>
-            Portfolio Performance
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={mockPortfolioCurve}>
-              <defs>
-                <linearGradient id="pGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3f8ef5" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#3f8ef5" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis 
-                dataKey="x" 
-                tick={{ fill: '#8b95b0', fontSize: 11 }} 
-                axisLine={false} 
-                tickLine={false} 
-              />
-              <Tooltip
-                contentStyle={{ 
-                  background: 'var(--bg-card)', 
-                  border: '1px solid var(--border)', 
-                  borderRadius: 8, 
-                  color: 'var(--text-primary)', 
-                  fontSize: 12 
-                }}
-                formatter={(v) => [`$${v.toLocaleString()}`, 'Value']}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="v" 
-                stroke="#3f8ef5" 
-                strokeWidth={2.5} 
-                fill="url(#pGrad)" 
-                dot={false} 
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Market Sentiment */}
-        <div className="card">
-          <div style={{ fontWeight: 600, marginBottom: 16, color: 'var(--text-primary)' }}>
-            Market Sentiment
-          </div>
-          {sentiment ? (
-            <>
-              <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                <div style={{ fontSize: 36, marginBottom: 6 }}>
-                  {sentiment.overall_sentiment === 'bullish' ? '🟢' : 
-                   sentiment.overall_sentiment === 'bearish' ? '🔴' : '🟡'}
-                </div>
-                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--text-primary)' }}>
-                  {sentiment.market_mood || 'Neutral'}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                  {sentiment.total_articles_analyzed || 0} articles analyzed
-                </div>
-              </div>
-
-              {[
-                { label: 'Bullish', val: sentiment.bullish_percent || 0, color: 'var(--accent-green)' },
-                { label: 'Neutral', val: sentiment.neutral_percent || 0, color: 'var(--accent-amber)' },
-                { label: 'Bearish', val: sentiment.bearish_percent || 0, color: 'var(--accent-red)' },
-              ].map((s) => (
-                <div key={s.label} style={{ marginBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4, color: 'var(--text-secondary)' }}>
-                    <span>{s.label}</span>
-                    <span style={{ color: s.color }}>{s.val}%</span>
-                  </div>
-                  <div style={{ height: 5, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div 
-                      style={{ 
-                        height: '100%', 
-                        width: `${s.val}%`, 
-                        background: s.color, 
-                        borderRadius: 3, 
-                        transition: 'width 0.8s ease' 
-                      }} 
-                    />
-                  </div>
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className="skeleton" style={{ height: 160 }} />
-          )}
-        </div>
-      </div>
-
-      {/* Top Movers */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontWeight: 600, marginBottom: 14, color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          Top Movers
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/market')}>View All</button>
-        </div>
-        <div className="grid-4">
-          {loading
-            ? [1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 100 }} />)
-            : topMovers.length > 0 
-              ? topMovers.map((s) => (
-                  <StockCard 
-                    key={s.symbol} 
-                    {...s} 
-                    onClick={() => navigate(`/market?symbol=${s.symbol}`)} 
-                  />
-                ))
-              : <p>No stocks in watchlist yet.</p>
-          }
-        </div>
-      </div>
-
-      {/* Latest News */}
-      <div>
-        <div style={{ fontWeight: 600, marginBottom: 14, color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          Latest News
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/research')}>View All</button>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {loading
-            ? [1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 90 }} />)
-            : news.length > 0
-              ? news.map((article) => <NewsCard key={article.id} article={article} />)
-              : <p>No recent news available.</p>
-          }
-        </div>
-      </div>
-    </div>
-  );
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 320 }} />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="card" style={{ padding: 24, color: 'var(--accent-red)' }}>{error}</div>
+      ) : companies.length === 0 ? (
+        <div className="card" style={{ padding: 24, color: 'var(--text-secondary)' }}>No companies returned from the API.</div>
+      ) : (
+        companies.map((c, i) => (
+          <CompanyRow key={c.symbol} company={c} rowIndex={i} highlighted={highlightedSymbol === c.symbol} />
+        ))
+      )}
+    </div>
+  );
 }
+
+
+

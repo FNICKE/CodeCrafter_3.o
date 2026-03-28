@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -361,4 +362,14 @@ html, body {
 @media (max-width: 768px) {
   .main-content { margin-left: 0; padding: 16px; }
   .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+}
+
+/* Skeleton shimmer — used by Dashboard / Research Hub via Tailwind animate-[dash-shimmer_…] */
+@keyframes dash-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes research-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
