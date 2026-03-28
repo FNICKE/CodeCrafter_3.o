@@ -1,184 +1,211 @@
 import { useEffect, useState } from 'react';
-import { getPortfolios, createPortfolio, getHoldings, deletePortfolio } from '../api';
-import { Plus, Trash2, ChevronDown, ChevronRight, Briefcase } from 'lucide-react';
+import { getPortfolios, getHoldings, addHolding, getQuote } from '../api';
+import { Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 const COLORS = ['#3f8ef5', '#22c55e', '#a855f7', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
 
 export default function Portfolio() {
-  const [portfolios, setPortfolios] = useState([]);
-  const [expanded, setExpanded] = useState(null);
-  const [holdings, setHoldings] = useState({});
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [portfolio, setPortfolio] = useState(null);   // single portfolio
+  const [holdings, setHoldings] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Form State
+  const [symbol, setSymbol] = useState('');
+  const [assetName, setAssetName] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [purchasePrice, setPurchasePrice] = useState('');
+  const [adding, setAdding] = useState(false);
+
   useEffect(() => {
-    loadPortfolios();
+    initPortfolio();
   }, []);
 
-  const loadPortfolios = () => {
-    getPortfolios().then((r) => setPortfolios(r.data)).catch(console.error).finally(() => setLoading(false));
-  };
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setCreating(true);
+  const initPortfolio = async () => {
     try {
-      await createPortfolio({ name: newName });
-      toast.success('Portfolio created!');
-      setNewName('');
-      loadPortfolios();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Error creating portfolio');
-    } finally { setCreating(false); }
-  };
+      const res = await getPortfolios();
+      const portfolios = res.data?.data || res.data || [];
+      const defaultPortfolio = portfolios[0];
 
-  const handleExpand = async (id) => {
-    if (expanded === id) { setExpanded(null); return; }
-    setExpanded(id);
-    if (!holdings[id]) {
-      try {
-        const res = await getHoldings(id);
-        setHoldings((prev) => ({ ...prev, [id]: res.data }));
-      } catch { toast.error('Failed to load holdings'); }
+      if (defaultPortfolio) {
+        setPortfolio(defaultPortfolio);
+        const holdingsRes = await getHoldings(defaultPortfolio.id);
+        setHoldings(holdingsRes.data?.data || holdingsRes.data || []);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load portfolio");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this portfolio?')) return;
+  const handleAddStock = async () => {
+    if (!symbol || !quantity || !purchasePrice) {
+      toast.error('Symbol, Quantity and Purchase Price are required');
+      return;
+    }
+
+    setAdding(true);
     try {
-      await deletePortfolio(id);
-      toast.success('Portfolio deleted');
-      loadPortfolios();
-      if (expanded === id) setExpanded(null);
-    } catch { toast.error('Delete failed'); }
+      const quoteRes = await getQuote(symbol.trim().toUpperCase());
+      const currentPrice = quoteRes.data?.c || parseFloat(purchasePrice);
+
+      await addHolding(portfolio.id, {
+        symbol: symbol.trim().toUpperCase(),
+        asset_name: assetName.trim() || symbol.trim().toUpperCase(),
+        quantity: parseFloat(quantity),
+        purchase_price: parseFloat(purchasePrice),
+        current_price: currentPrice,
+      });
+
+      toast.success('Stock added successfully!');
+
+      // Refresh holdings
+      const res = await getHoldings(portfolio.id);
+      setHoldings(res.data?.data || res.data || []);
+
+      // Clear form
+      setSymbol('');
+      setAssetName('');
+      setQuantity('');
+      setPurchasePrice('');
+
+    } catch (err) {
+      toast.error('Failed to add stock. Please check the symbol.');
+    } finally {
+      setAdding(false);
+    }
   };
 
-  const riskColor = (score) => {
-    if (score <= 3) return 'var(--accent-green)';
-    if (score <= 6) return 'var(--accent-amber)';
-    return 'var(--accent-red)';
-  };
+  const totalValue = holdings.reduce((sum, h) => {
+    return sum + Number(h.quantity) * (Number(h.current_price) || Number(h.purchase_price) || 0);
+  }, 0);
+
+  if (loading) return <div className="skeleton" style={{ height: 400 }} />;
 
   return (
     <div className="animate-in">
       <div className="page-header">
-        <h1 className="page-title">💼 Portfolio Manager</h1>
-        <p className="page-subtitle">Build and track your investment portfolios</p>
+        <h1 className="page-title">My Portfolio</h1>
+        <p className="page-subtitle">Track your stocks with live market prices</p>
       </div>
 
-      {/* Create Portfolio */}
-      <form onSubmit={handleCreate} style={{ display: 'flex', gap: 12, marginBottom: 28 }}>
-        <input
-          id="portfolio-name-input"
-          className="input"
-          placeholder="New portfolio name (e.g. Growth 2025)"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          style={{ maxWidth: 360 }}
-        />
-        <button id="portfolio-create-btn" type="submit" className="btn btn-primary" disabled={creating}>
-          <Plus size={16} /> {creating ? 'Creating...' : 'Create'}
-        </button>
-      </form>
-
-      {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 72 }} />)}
+      <div className="card" style={{ marginBottom: 32 }}>
+        <h3>Add New Stock</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 0.8fr 0.9fr auto', gap: 12, marginTop: 16 }}>
+          <input
+            className="input"
+            placeholder="Symbol (AAPL, RELIANCE)"
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+          />
+          <input
+            className="input"
+            placeholder="Company Name (optional)"
+            value={assetName}
+            onChange={(e) => setAssetName(e.target.value)}
+          />
+          <input
+            type="number"
+            className="input"
+            placeholder="Quantity"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
+          <input
+            type="number"
+            step="0.01"
+            className="input"
+            placeholder="Avg Buy Price ₹"
+            value={purchasePrice}
+            onChange={(e) => setPurchasePrice(e.target.value)}
+          />
+          <button 
+            className="btn btn-primary"
+            onClick={handleAddStock}
+            disabled={adding || !symbol || !quantity || !purchasePrice}
+          >
+            <Plus size={18} /> {adding ? 'Adding...' : 'Add'}
+          </button>
         </div>
-      ) : portfolios.length === 0 ? (
+      </div>
+
+      <div style={{ marginBottom: 20, fontSize: 20, fontWeight: 600 }}>
+        Total Value: <span style={{ color: 'var(--accent-green)' }}>₹{totalValue.toLocaleString('en-IN')}</span>
+      </div>
+
+      {holdings.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 60 }}>
-          <Briefcase size={40} style={{ color: 'var(--text-muted)', margin: '0 auto 16px' }} />
-          <div style={{ color: 'var(--text-secondary)', fontSize: 16, fontWeight: 500 }}>No portfolios yet</div>
-          <div style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 6 }}>Create your first portfolio above</div>
+          <p style={{ color: 'var(--text-muted)' }}>No stocks added yet. Add your first stock above.</p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {portfolios.map((p) => (
-            <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 20px', cursor: 'pointer' }}
-                onClick={() => handleExpand(p.id)}
-              >
-                <div style={{ display: 'flex', align: 'center', gap: 16 }}>
-                  {expanded === p.id ? <ChevronDown size={18} style={{ color: 'var(--accent-blue)', marginTop:2 }} /> : <ChevronRight size={18} style={{ color: 'var(--text-muted)', marginTop:2 }} />}
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>{p.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {p.holding_count || 0} holdings · Risk:{' '}
-                      <span style={{ color: riskColor(p.risk_score) }}>{p.risk_score}/10</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', align: 'center', gap: 16 }}>
-                  <div style={{ textAlign: 'right', marginRight: 16 }}>
-                    <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-primary)' }}>
-                      ${Number(p.total_value || 0).toLocaleString()}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>total value</div>
-                  </div>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
-                    title="Delete portfolio"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
+        <div className="card">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 30 }}>
+            <div>
+              <h3>Your Holdings</h3>
+              <table className="data-table" style={{ marginTop: 16 }}>
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Company</th>
+                    <th>Qty</th>
+                    <th>Buy Price</th>
+                    <th>Current</th>
+                    <th>Value</th>
+                    <th>P&L %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holdings.map((h) => {
+                    const curr = Number(h.current_price) || Number(h.purchase_price) || 0;
+                    const value = Number(h.quantity) * curr;
+                    const pnlPercent = Number(h.purchase_price) > 0 
+                      ? ((curr - Number(h.purchase_price)) / Number(h.purchase_price)) * 100 
+                      : 0;
 
-              {expanded === p.id && (
-                <div style={{ borderTop: '1px solid var(--border)', padding: '20px' }}>
-                  {!holdings[p.id] ? (
-                    <div className="skeleton" style={{ height: 100 }} />
-                  ) : holdings[p.id].length === 0 ? (
-                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px 0', fontSize: 13 }}>
-                      No holdings added yet
-                    </div>
-                  ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-                      <div>
-                        <table className="data-table">
-                          <thead>
-                            <tr>
-                              <th>Ticker</th>
-                              <th>Name</th>
-                              <th>Alloc</th>
-                              <th>Qty</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {holdings[p.id].map((h) => (
-                              <tr key={h.id}>
-                                <td style={{ fontWeight: 700 }}>{h.ticker}</td>
-                                <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{h.asset_name}</td>
-                                <td><span className="badge badge-blue">{h.allocation_percent}%</span></td>
-                                <td>{h.quantity}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <ResponsiveContainer width="100%" height={200}>
-                          <PieChart>
-                            <Pie data={holdings[p.id].map((h, i) => ({ name: h.ticker, value: Number(h.allocation_percent) }))} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value">
-                              {holdings[p.id].map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                            </Pie>
-                            <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => [`${v}%`, 'Allocation']} />
-                            <Legend wrapperStyle={{ fontSize: 11 }} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    return (
+                      <tr key={h.id}>
+                        <td><strong>{h.symbol}</strong></td>
+                        <td>{h.asset_name}</td>
+                        <td>{h.quantity}</td>
+                        <td>₹{Number(h.purchase_price).toFixed(2)}</td>
+                        <td>₹{curr.toFixed(2)}</td>
+                        <td>₹{value.toLocaleString('en-IN')}</td>
+                        <td style={{ color: pnlPercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                          {pnlPercent.toFixed(1)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
+
+            <div>
+              <h3>Allocation</h3>
+              <ResponsiveContainer width="100%" height={380}>
+                <PieChart>
+                  <Pie
+                    data={holdings.map(h => ({
+                      name: h.symbol,
+                      value: Number(h.quantity) * (Number(h.current_price) || Number(h.purchase_price) || 0)
+                    }))}
+                    cx="50%" 
+                    cy="50%"
+                    innerRadius={85}
+                    outerRadius={135}
+                    dataKey="value"
+                  >
+                    {holdings.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
     </div>

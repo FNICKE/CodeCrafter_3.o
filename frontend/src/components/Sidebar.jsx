@@ -11,7 +11,6 @@ const navItems = [
   { to: '/market', icon: TrendingUp, label: 'Market' },
   { to: '/portfolio', icon: Briefcase, label: 'Portfolio' },
   { to: '/research', icon: Newspaper, label: 'Research Hub' },
-  { to: '/alerts', icon: Bell, label: 'Alerts' },
   { to: '/crypto', icon: Bitcoin, label: 'Crypto' },
   { to: '/screener', icon: Search, label: 'Screener' },
   { to: '/stock', icon: Target, label: 'Quick Lookup' },

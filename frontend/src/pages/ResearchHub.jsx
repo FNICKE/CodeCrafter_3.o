@@ -3,12 +3,12 @@ import { getNews, getMarketSentiment } from '../api';
 import NewsCard from '../components/NewsCard';
 import { Newspaper, Filter, TrendingUp } from 'lucide-react';
 
-const CATEGORIES = ['general', 'forex', 'crypto', 'merger'];
+const CATEGORIES = ['forex', 'crypto', 'merger'];
 
 export default function ResearchHub() {
   const [news, setNews] = useState([]);
   const [sentiment, setSentiment] = useState(null);
-  const [category, setCategory] = useState('general');
+  const [category, setCategory] = useState('forex');
   const [loading, setLoading] = useState(true);
   const [tickerFilter, setTickerFilter] = useState('');
 

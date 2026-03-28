@@ -84,6 +84,19 @@ const searchSymbol = async (req, res) => {
     res.status(500).json({ message: "Search failed", error: err.message });
   }
 };
+const searchStocks = async (req, res) => {
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ message: "Query is required" });
+
+  try {
+    const response = await axios.get(
+      `https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_API_KEY}`
+    );
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({ message: "Search failed", error: err.message });
+  }
+};
 
 // GET /api/market/crypto
 const getCryptoPrices = async (req, res) => {
@@ -108,6 +121,8 @@ const getCryptoPrices = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch crypto", error: err.message });
   }
+  // Search stocks using Finnhub
+// Get single quote (already exists as getQuote)
 };
 
-module.exports = { getQuote, getCandles, getWatchlist, searchSymbol, getCryptoPrices };
+module.exports = { getQuote, getCandles, getWatchlist, searchSymbol, getCryptoPrices, searchStocks };
