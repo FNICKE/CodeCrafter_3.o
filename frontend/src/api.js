@@ -35,6 +35,10 @@ export const getPortfolios = () => API.get('/portfolio');
 export const createPortfolio = (data) => API.post('/portfolio', data);
 export const getHoldings = (id) => API.get(`/portfolio/${id}/holdings`);
 export const addHolding = (id, data) => API.post(`/portfolio/${id}/holdings`, data);
+export const updateHolding = (portfolioId, holdingId, data) =>
+  API.put(`/portfolio/${portfolioId}/holdings/${holdingId}`, data);
+export const deleteHolding = (portfolioId, holdingId) =>
+  API.delete(`/portfolio/${portfolioId}/holdings/${holdingId}`);
 export const deletePortfolio = (id) => API.delete(`/portfolio/${id}`);
 
 // ====================== RESEARCH ======================
