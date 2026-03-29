@@ -5,7 +5,7 @@ import { sendChatMessage } from "../api";
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([
-    { role: "assistant", content: "Hi! I'm HackBot, your AI financial assistant. I'm connected to the HackTrix Smart Finance pipeline. I can analyze live stocks, summarize filings, or explain how our platform works. What can I help you with?" }
+    { role: "assistant", content: "Hi! I'm StockSense, your AI financial assistant. I can analyze live stocks, summarize filings, provide the latest market news, or explain how our platform works. What can I help you with?" }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -28,7 +28,7 @@ export default function ChatWidget() {
     try {
       const res = await sendChatMessage(newMessages.map(m => ({ role: m.role, content: m.content })));
       setMessages([...newMessages, res.data]);
-    } catch (err) {
+    } catch {
       setMessages([
         ...newMessages,
         { role: "assistant", content: "Sorry, I'm having trouble connecting right now." }
@@ -92,7 +92,7 @@ export default function ChatWidget() {
               <Bot size={20} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>HackBot AI</h3>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#fff" }}>StockSense AI</h3>
               <p style={{ margin: 0, fontSize: 11, opacity: 0.8 }}>Live Finance & Platform Intelligence</p>
             </div>
           </div>

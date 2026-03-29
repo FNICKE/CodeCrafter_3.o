@@ -144,7 +144,7 @@ const summaryCode = `function SummaryView() {
             {symbolsMeta.warning}
           </div>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16, alignItems: 'flex-end' }}>
+        <div style={{ display: 'none', flexWrap: 'wrap', gap: 16, marginBottom: 16, alignItems: 'flex-end' }}>
           <div style={{ flex: '0 0 200px' }}>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.1em', fontFamily: "'DM Mono', monospace" }}>Market</label>
             <select

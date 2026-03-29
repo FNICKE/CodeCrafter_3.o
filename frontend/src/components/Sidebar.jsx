@@ -246,7 +246,7 @@ export default function Sidebar() {
           <Activity size={20} color="#fff" />
         </div>
         <div>
-          <div className="sb-logo-name">HackTrix</div>
+          <div className="sb-logo-name">StockSense</div>
           <div className="sb-logo-tagline">Smart Finance</div>
         </div>
       </div>

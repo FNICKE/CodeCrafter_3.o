@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { getStockSummary as apiGetStockSummary, getStockSymbols as apiGetStockSymbols } from '../api';
 const apiGetWatchlist = async () => ({ data: [] });
 import {
@@ -108,11 +108,7 @@ function timeAgo(ts) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-function sentimentColor(s) {
-  if (s === 'Very Positive' || s === 'Positive') return '#34d399';
-  if (s === 'Very Negative' || s === 'Negative') return '#f87171';
-  return '#5a6878';
-}
+
 
 const predColor = (label) => {
   const l = (label || '').toLowerCase();
@@ -275,7 +271,7 @@ export default function StockSummary() {
             {symbolsMeta.warning}
           </div>
         )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16, alignItems: 'flex-end' }}>
+        <div style={{ display: 'none', flexWrap: 'wrap', gap: 16, marginBottom: 16, alignItems: 'flex-end' }}>
           <div style={{ flex: '0 0 200px' }}>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.1em', fontFamily: "'DM Mono', monospace" }}>Market</label>
             <select

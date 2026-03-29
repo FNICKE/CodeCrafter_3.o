@@ -311,7 +311,7 @@ export default function Recommendations() {
   const [topError,   setTopError]   = useState(null);
 
   const [searchSym,  setSearchSym]  = useState('');
-  const [budget,     setBudget]     = useState(100000);
+  const [budget,     setBudget]     = useState(50000);
   const [results,    setResults]    = useState(null);
   const [searching,  setSearching]  = useState(false);
   const [searchErr,  setSearchErr]  = useState(null);
