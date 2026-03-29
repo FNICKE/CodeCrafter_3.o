@@ -66,11 +66,33 @@ export const getCryptoPrices = () => API.get('/market/crypto');
 // ====================== STOCKS & RECOMMENDATIONS ======================
 export const getStock = (symbol) => API.get(`/stocks/${symbol}`);
 export const getRecommendations = (data) => API.post('/recommendations', data);
+export const getTopStocks = (budget) => API.get(`/recommendations/top`, { params: { budget } });
 
 // ====================== ALERTS ======================
 export const getAlerts = () => API.get('/alerts');
 export const createAlert = (data) => API.post('/alerts', data);
 export const deleteAlert = (id) => API.delete(`/alerts/${id}`);
 export const toggleAlert = (id) => API.put(`/alerts/${id}/toggle`);
+
+export const sendChatMessage = (messages) => API.post('/chat', { messages }, { timeout: 30000 });
+
+export const getRegulatoryFilings = (params) => API.get('/regulatory/filings', { params });
+// ====================== AI ADVISOR ======================
+// Enhanced with all new endpoints
+export const getAIPrediction = (data) => 
+  API.post('/ai/predict', data, { timeout: 30000 });
+
+export const getQuickStockAdvice = (data) => 
+  API.post('/ai/quick-advice', data, { timeout: 15000 });
+
+export const getPortfolioBuilder = (data) => 
+  API.post('/ai/portfolio', data, { timeout: 25000 });
+
+export const getSIPCalculator = (data) => 
+  API.post('/ai/sip', data, { timeout: 20000 });
+
+export const getLiquidStrategy = (data) => 
+  API.post('/ai/liquid', data, { timeout: 15000 });
+
 
 export default API;

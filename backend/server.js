@@ -16,6 +16,11 @@ const alertRoutes = require("./src/routes/alerts");
 const marketRoutes = require("./src/routes/market");
 const stockRoutes = require("./src/routes/stock");
 const recommendationRoutes = require("./src/routes/recommendation");
+const trustRoutes = require('./src/routes/trustRoutes');
+const regulatoryRoutes = require('./src/routes/regulatoryRoutes');
+const riskRoutes = require('./src/routes/riskRoutes');
+const reportsRoutes = require('./src/routes/reportsRoutes');
+const chatRoutes = require('./src/routes/chatRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -42,6 +47,12 @@ app.use("/api/alerts", alertRoutes);
 app.use("/api/market", marketRoutes);
 app.use("/api/stocks", stockRoutes);
 app.use("/api/recommendations", recommendationRoutes);
+app.use('/api/trust',trustRoutes);
+app.use('/api/regulatory',regulatoryRoutes);
+app.use('/api/risk',riskRoutes);
+app.use('/api/reports',reportsRoutes);
+app.use('/api/chat', chatRoutes);
+app.use("/api/ai", require("./src/routes/aiRoutes"));
 
 // Health check
 app.get("/api/health", (req, res) => {
