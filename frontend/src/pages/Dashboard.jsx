@@ -170,6 +170,7 @@ function injectStyles() {
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 const NEWS_PER_STOCK = 4;
+const NEWS_LOAD_LIMIT = 0; // initial load: 0 = no news (fast). News lazy-loads per card.
 
 const TICKER_TAPE = [
   'AAPL +1.2%','MSFT +0.8%','NVDA +3.4%','GOOGL -0.3%','AMZN +1.7%',
@@ -247,7 +248,7 @@ function TickerTape() {
 }
 
 /* ─── Company Card ──────────────────────────────────────────────────────────── */
-function CompanyRow({ company, rowIndex, highlighted }) {
+function CompanyRow({ company, rowIndex, highlighted, onVisible }) {
   const quote    = company.quote   || {};
   const prof     = company.profile || {};
   const currency = company.currency || prof.currency || 'USD';
@@ -258,6 +259,18 @@ function CompanyRow({ company, rowIndex, highlighted }) {
   const newsList = Array.isArray(company.news)
     ? [...company.news].sort((a, b) => (b.datetime || 0) - (a.datetime || 0)).slice(0, NEWS_PER_STOCK)
     : [];
+
+  // Trigger lazy news load when this card becomes visible
+  const cardRef = useRef(null);
+  useEffect(() => {
+    if (!onVisible) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { onVisible(company.symbol); obs.disconnect(); } },
+      { threshold: 0.1 }
+    );
+    if (cardRef.current) obs.observe(cardRef.current);
+    return () => obs.disconnect();
+  }, [company.symbol, onVisible]);
 
   const dpUp = (quote.dp || 0) >= 0;
 
@@ -330,7 +343,7 @@ function CompanyRow({ company, rowIndex, highlighted }) {
           ? newsList.map((article) => (
               <NewsCard key={`${company.symbol}-${article.id}`} article={article} compact />
             ))
-          : <div className="db-empty">No company headlines for {company.symbol} right now.</div>
+          : <div className="db-empty" style={{ fontSize: '.8rem', padding: '1.5rem' }}>Loading headlines for {company.symbol}…</div>
         }
       </div>
     </div>
@@ -338,6 +351,7 @@ function CompanyRow({ company, rowIndex, highlighted }) {
 
   return (
     <div
+      ref={cardRef}
       id={`dash-company-${company.symbol}`}
       className={`db-company-card db-fade-up ${highlighted ? 'highlighted' : ''}`}
       style={{ scrollMarginTop: 100, animationDelay: `${Math.min(rowIndex, 6) * 0.06}s` }}
@@ -397,11 +411,14 @@ export default function Dashboard() {
   const [searchOpen,        setSearchOpen]        = useState(false);
   const [highlightedSymbol, setHighlightedSymbol] = useState(null);
   const searchRef = useRef(null);
+  // Use a ref set for loaded symbols so the callback is stable (no state churn)
+  const loadedNewsRef = useRef(new Set());
 
+  // Phase 1: fast load — quotes + profiles only (newsLimit=0)
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError(null);
-    getCompaniesWithNews({ newsLimit: NEWS_PER_STOCK })
+    getCompaniesWithNews({ newsLimit: NEWS_LOAD_LIMIT })
       .then((r) => {
         if (cancelled) return;
         const rows = r.data?.companies;
@@ -413,6 +430,22 @@ export default function Dashboard() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Stable callback — uses a ref so React.memo(CompanyRow) doesn't bust on every render
+  const loadCompanyNews = React.useCallback((symbol) => {
+    if (loadedNewsRef.current.has(symbol)) return;
+    loadedNewsRef.current.add(symbol);
+    import('../api').then(({ getNews }) => {
+      getNews({ ticker: symbol, limit: NEWS_PER_STOCK })
+        .then((r) => {
+          const articles = r.data?.data || [];
+          setCompanies((prev) =>
+            prev.map((c) => c.symbol === symbol ? { ...c, news: articles } : c)
+          );
+        })
+        .catch(() => { /* already marked in ref, won't retry */ });
+    });
+  }, []); // empty deps — stable reference forever
 
   const suggestions = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
@@ -528,7 +561,13 @@ export default function Dashboard() {
           <div className="db-empty">No companies returned from the API.</div>
         ) : (
           companies.map((c, i) => (
-            <MemoCompanyRow key={c.symbol} company={c} rowIndex={i} highlighted={highlightedSymbol === c.symbol} />
+            <MemoCompanyRow
+              key={c.symbol}
+              company={c}
+              rowIndex={i}
+              highlighted={highlightedSymbol === c.symbol}
+              onVisible={loadCompanyNews}
+            />
           ))
         )}
 

@@ -3,6 +3,7 @@
 
 const axios  = require('axios');
 const db     = require('../config/db');
+const cache  = require('../config/cache');
 
 const FINNHUB_KEY  = process.env.FINNHUB_API_KEY;
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
@@ -84,11 +85,17 @@ const getPortfolioRisk = async (req, res) => {
     let current = Number(h.current_price) || Number(h.purchase_price) || 0;
 
     try {
-      const { data } = await axios.get(
-        `${FINNHUB_BASE}/quote?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_KEY}`,
-        { timeout: 8000 }
-      );
-      if (data?.c && data.c > 0) current = data.c;
+      // Use shared quote cache
+      const quoteCk = `quote-${sym}`;
+      let current_live = cache.get(quoteCk, cache.TTL.QUOTE);
+      if (!current_live) {
+        const { data } = await axios.get(
+          `${FINNHUB_BASE}/quote?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_KEY}`,
+          { timeout: 8000 }
+        );
+        if (data?.c && data.c > 0) { current_live = data; cache.set(quoteCk, data); }
+      }
+      if (current_live?.c && current_live.c > 0) current = current_live.c;
     } catch {}
 
     const value    = Number(h.quantity) * current;
@@ -232,18 +239,24 @@ const getPortfolioRisk = async (req, res) => {
 // ── GET /api/risk/benchmark ───────────────────────────────────────────────────
 const getBenchmark = async (req, res) => {
   try {
+    const ck = 'benchmark-spy';
+    const hit = cache.get(ck, cache.TTL.QUOTE);
+    if (hit) return res.json(hit);
+
     const { data } = await axios.get(
       `${FINNHUB_BASE}/quote?symbol=SPY&token=${FINNHUB_KEY}`,
       { timeout: 10000 }
     );
-    res.json({
+    const result = {
       symbol: 'SPY',
       name:   'S&P 500 ETF',
       price:  data?.c,
       change_pct: data?.dp,
       beta:   1.0,
       description: 'The S&P 500 benchmark. A portfolio beta > 1 moves more than the market; < 1 moves less.',
-    });
+    };
+    cache.set(ck, result);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Failed to fetch benchmark', error: err.message });
   }

@@ -1,6 +1,7 @@
 const db = require("../config/db");
 const axios = require("axios");
 const { POPULAR_TICKERS } = require("../constants/popularTickers");
+const cache = require("../config/cache");
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || "d73ns7pr01qjjol3m9l0d73ns7pr01qjjol3m9lg";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
@@ -13,7 +14,7 @@ async function finnhubFetch(pathWithQuery, logCtx, retries = 1) {
     const url = pathWithQuery.includes("?")
       ? `${FINNHUB_BASE}${pathWithQuery}&token=${FINNHUB_API_KEY}`
       : `${FINNHUB_BASE}${pathWithQuery}?token=${FINNHUB_API_KEY}`;
-    const { data } = await axios.get(url, { timeout: 15000 });
+    const { data } = await axios.get(url, { timeout: 12000 });
     return data;
   } catch (e) {
     const status = e.response?.status;
@@ -26,20 +27,6 @@ async function finnhubFetch(pathWithQuery, logCtx, retries = 1) {
     console.warn(`[research] Finnhub ${pathPart}${logCtx ? ` (${logCtx})` : ""}:`, status || e.message);
     return null;
   }
-}
-
-// ── Server-side in-memory cache (5 min TTL) ──────────────────────────────────
-const _cache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
-
-function cacheGet(key) {
-  const entry = _cache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL) { _cache.delete(key); return null; }
-  return entry.value;
-}
-function cacheSet(key, value) {
-  _cache.set(key, { value, ts: Date.now() });
 }
 
 // ── News helpers ─────────────────────────────────────────────────────────────
@@ -72,7 +59,6 @@ function newsRowKey(row) {
     : `${row.url || "nourl"}-${row.datetime || 0}-${(row.headline || "").slice(0, 40)}`;
 }
 
-// Only keep articles that are clearly stock-market related
 const STOCK_KEYWORDS = [
   "stock", "share", "equity", "market", "nasdaq", "nyse", "s&p", "dow jones",
   "earnings", "ipo", "merger", "acquisition", "revenue", "profit", "dividend",
@@ -88,13 +74,45 @@ function isStockMarketRelevant(item) {
   return STOCK_KEYWORDS.some((kw) => text.includes(kw));
 }
 
-// Classify each article into a sub-category
 function classifyArticle(item) {
   const text = `${item.headline} ${item.summary || ""}`.toLowerCase();
   if (/\bearnings?\b|revenue|profit|loss|\beps\b|quarterly|fiscal/.test(text)) return "earnings";
-  if (/\bmerger\b|acquisition|acqui|takeover|buyout|\bdeal\b/.test(text))      return "merger";
+  if (/\bmerger\b|acquisition|acqui|takeover|buyout|\bdeal\b/.test(text)) return "merger";
   if (/\bipo\b|initial public offering|list[s]? on|stock market debut/.test(text)) return "ipo";
   return "general";
+}
+
+// ── Fetch general news pool once, cache 5 min ────────────────────────────────
+async function getGeneralNewsFeed() {
+  const ck = "general-feed";
+  const cached = cache.get(ck, cache.TTL.GENERAL_NEWS);
+  if (cached) return cached;
+
+  let raw = [];
+  try {
+    const { data } = await axios.get(
+      `${FINNHUB_BASE}/news?category=general&token=${FINNHUB_API_KEY}`,
+      { timeout: 15000 }
+    );
+    raw = Array.isArray(data) ? data : [];
+  } catch (e) {
+    if (e.response?.status === 429) throw e; // bubble up for caller to handle
+    console.warn("[research] general news fetch failed:", e.message);
+  }
+
+  const byId = new Map();
+  for (const item of raw) {
+    if (!item?.headline) continue;
+    if (!isStockMarketRelevant(item)) continue;
+    const subCat = classifyArticle(item);
+    const row = mapNewsRow(item, null, subCat);
+    const k = newsRowKey(row);
+    if (!byId.has(k)) byId.set(k, { ...row, id: k, category: subCat });
+  }
+
+  const pool = Array.from(byId.values()).sort((a, b) => (b.datetime || 0) - (a.datetime || 0));
+  cache.set(ck, pool);
+  return pool;
 }
 
 // ── GET /api/research/assets ─────────────────────────────────────────────────
@@ -109,6 +127,10 @@ const getAssets = (req, res) => {
 const getAssetByTicker = async (req, res) => {
   const sym = String(req.params.ticker || "").toUpperCase();
   if (!sym) return res.status(400).json({ message: "Ticker required" });
+
+  const ck = `asset-ticker-${sym}`;
+  const hit = cache.get(ck, cache.TTL.ASSET_TICKER);
+  if (hit) return res.json(hit);
 
   const localAssetPromise = new Promise((resolve) => {
     db.query("SELECT * FROM assets WHERE ticker = ?", [sym], (err, rows) => {
@@ -125,31 +147,21 @@ const getAssetByTicker = async (req, res) => {
       localAssetPromise,
     ]);
 
-    res.json({
+    const result = {
       ticker: sym,
       quote:     quote     && typeof quote     === "object" ? quote     : {},
       profile:   profile   && typeof profile   === "object" ? profile   : {},
       sentiment: sentiment && typeof sentiment === "object" ? sentiment : {},
       localData,
-    });
+    };
+    cache.set(ck, result);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch asset data", error: err.message });
   }
 };
 
 // ── GET /api/research/news ────────────────────────────────────────────────────
-//
-// Strategy: Finnhub free tier allows ~30 req/min.
-// Instead of fetching 4 categories in parallel (which causes 429s),
-// we fetch only "general" once, cache it 5 min, then classify & filter
-// articles server-side. Category tabs (earnings/merger/ipo) are derived
-// from keyword classification — no extra API calls needed.
-//
-// Query params:
-//   category – "all" | "general" | "merger" | "ipo" | "earnings"
-//   ticker   – optional symbol for company-scoped news
-//   page     – 1-based (default 1)
-//   limit    – max 50 (default 12)
 const getNews = async (req, res) => {
   const { ticker } = req.query;
   const category = String(req.query.category || "all").toLowerCase();
@@ -162,8 +174,8 @@ const getNews = async (req, res) => {
 
     // ── Ticker-scoped news ───────────────────────────────────────────────────
     if (sym) {
-      const ck = `ticker-${sym}`;
-      pool = cacheGet(ck);
+      const ck = `ticker-news-${sym}`;
+      pool = cache.get(ck, cache.TTL.COMPANY_NEWS);
 
       if (!pool) {
         const today = new Date().toISOString().split("T")[0];
@@ -183,7 +195,7 @@ const getNews = async (req, res) => {
             if (!byId.has(k)) byId.set(k, { ...row, id: k });
           }
           pool = Array.from(byId.values()).sort((a, b) => (b.datetime || 0) - (a.datetime || 0));
-          cacheSet(ck, pool);
+          cache.set(ck, pool);
         } catch (e) {
           if (e.response?.status === 429) {
             return res.status(429).json({ message: "Rate limit reached. Please wait a moment." });
@@ -194,59 +206,27 @@ const getNews = async (req, res) => {
 
     // ── General / merged feed — ONE Finnhub call ─────────────────────────────
     } else {
-      const ck = "general-feed";
-      pool = cacheGet(ck);
-
-      if (!pool) {
-        let raw = [];
-        try {
-          const { data } = await axios.get(
-            `${FINNHUB_BASE}/news?category=general&token=${FINNHUB_API_KEY}`,
-            { timeout: 15000 }
-          );
-          raw = Array.isArray(data) ? data : [];
-        } catch (e) {
-          if (e.response?.status === 429) {
-            return res.status(429).json({ message: "Rate limit reached. Please wait a moment." });
-          }
-          console.warn("[research] general news fetch failed:", e.message);
+      try {
+        pool = await getGeneralNewsFeed();
+      } catch (e) {
+        if (e.response?.status === 429) {
+          return res.status(429).json({ message: "Rate limit reached. Please wait a moment." });
         }
-
-        const byId = new Map();
-        for (const item of raw) {
-          if (!item?.headline) continue;
-          if (!isStockMarketRelevant(item)) continue;       // filter non-market noise
-          const subCat = classifyArticle(item);             // tag with earnings/merger/ipo/general
-          const row    = mapNewsRow(item, null, subCat);
-          const k      = newsRowKey(row);
-          if (!byId.has(k)) byId.set(k, { ...row, id: k, category: subCat });
-        }
-
-        pool = Array.from(byId.values()).sort((a, b) => (b.datetime || 0) - (a.datetime || 0));
-        cacheSet(ck, pool);
+        throw e;
       }
 
-      // Apply category filter (derived from classification, zero extra API calls)
       if (category !== "all") {
         pool = pool.filter((item) => item.category === category);
       }
     }
 
-    // ── Paginate ──────────────────────────────────────────────────────────────
     const total      = pool.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const data       = pool.slice((page - 1) * limit, page * limit);
 
     return res.json({
       data,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1,
-      },
+      pagination: { page, limit, total, totalPages, hasNextPage: page < totalPages, hasPrevPage: page > 1 },
     });
   } catch (err) {
     console.error("[research] getNews error:", err.message);
@@ -255,49 +235,73 @@ const getNews = async (req, res) => {
 };
 
 // ── GET /api/research/companies-overview ─────────────────────────────────────
+//
+// OPTIMIZED: Two-phase approach
+//   Phase 1 — returns quote + profile FAST (no news) — cached 5 min
+//   Phase 2 — client can call /api/research/news?ticker=SYM for news per-card
+//
+// newsLimit=0 → just quotes+profiles (used by Dashboard on initial load)
+// newsLimit>0 → also includes news (slower, still cached)
 const getCompaniesWithNews = async (req, res) => {
   const rawLimit = req.query.newsLimit;
-  let newsLimit = 5;
+  let newsLimit = 0; // default to 0 (fast mode!)
   if (rawLimit !== undefined && rawLimit !== "") {
     const n = parseInt(rawLimit, 10);
-    newsLimit = Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : 5;
+    newsLimit = Number.isFinite(n) ? Math.min(5, Math.max(0, n)) : 0;
   }
 
-  const ck = `companies-${newsLimit}`;
-  const cached = cacheGet(ck);
-  if (cached) return res.json(cached);
+  const ck = `companies-brief-${newsLimit}`;
+  const hit = cache.get(ck, cache.TTL.COMPANY_BRIEF);
+  if (hit) return res.json(hit);
 
   const today = new Date().toISOString().split("T")[0];
-  const past  = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const past  = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]; // 14 days (reduced from 30)
 
   const buildOne = async (sym) => {
-    const [quote, profile] = await Promise.all([
-      finnhubFetch(`/quote?symbol=${encodeURIComponent(sym)}`, sym),
-      finnhubFetch(`/stock/profile2?symbol=${encodeURIComponent(sym)}`, sym),
-    ]);
+    // Check per-symbol quote cache first
+    const quoteCk = `quote-${sym}`;
+    const profCk  = `profile-${sym}`;
+    let quote   = cache.get(quoteCk, cache.TTL.QUOTE);
+    let profile = cache.get(profCk,  cache.TTL.COMPANY_BRIEF);
+
+    if (!quote || !profile) {
+      const fetched = await Promise.all([
+        quote   ? Promise.resolve(quote)   : finnhubFetch(`/quote?symbol=${encodeURIComponent(sym)}`, sym),
+        profile ? Promise.resolve(profile) : finnhubFetch(`/stock/profile2?symbol=${encodeURIComponent(sym)}`, sym),
+      ]);
+      if (!quote)   { quote   = fetched[0]; if (quote)   cache.set(quoteCk, quote); }
+      if (!profile) { profile = fetched[1]; if (profile) cache.set(profCk,  profile); }
+    }
 
     let news = [];
     if (newsLimit > 0) {
-      await delay(200);
-      try {
-        const { data } = await axios.get(
-          `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(sym)}&from=${past}&to=${today}&token=${FINNHUB_API_KEY}`,
-          { timeout: 12000 }
-        );
-        const raw  = Array.isArray(data) ? data : [];
-        const seen = new Set();
-        for (const item of raw) {
-          if (!item?.headline) continue;
-          if (item.related && !relatedSymbolsIncludes(item.related, sym)) continue;
-          const row = mapNewsRow(item, sym, "company");
-          const k   = newsRowKey(row);
-          if (seen.has(k)) continue;
-          seen.add(k);
-          news.push({ ...row, id: k });
-          if (news.length >= newsLimit) break;
+      const newsCk = `company-news-brief-${sym}`;
+      news = cache.get(newsCk, cache.TTL.COMPANY_NEWS);
+      if (!news) {
+        await delay(150);
+        try {
+          const { data } = await axios.get(
+            `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(sym)}&from=${past}&to=${today}&token=${FINNHUB_API_KEY}`,
+            { timeout: 10000 }
+          );
+          const raw  = Array.isArray(data) ? data : [];
+          const seen = new Set();
+          news = [];
+          for (const item of raw) {
+            if (!item?.headline) continue;
+            if (item.related && !relatedSymbolsIncludes(item.related, sym)) continue;
+            const row = mapNewsRow(item, sym, "company");
+            const k   = newsRowKey(row);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            news.push({ ...row, id: k });
+            if (news.length >= newsLimit) break;
+          }
+          cache.set(newsCk, news);
+        } catch (e) {
+          console.warn(`[research] company-news ${sym}:`, e.response?.status || e.message);
+          news = [];
         }
-      } catch (e) {
-        console.warn(`[research] company-news ${sym}:`, e.response?.status || e.message);
       }
     }
 
@@ -306,26 +310,33 @@ const getCompaniesWithNews = async (req, res) => {
       symbol: sym, name: prof.name || sym,
       exchange: prof.exchange || null, currency: prof.currency || "USD",
       industry: prof.finnhubIndustry || null,
-      quote:    quote && typeof quote === "object" ? quote : {},
+      quote:   quote && typeof quote === "object" ? quote : {},
       profile: {
         name: prof.name, logo: prof.logo, weburl: prof.weburl,
         finnhubIndustry: prof.finnhubIndustry, country: prof.country,
         marketCapitalization: prof.marketCapitalization ?? null,
+        description: prof.description || null,
       },
       news,
     };
   };
 
-  const BATCH = 2;
+  // Fetch in batches of 5 (quote+profile only) — much faster than original BATCH=2 with news
+  const BATCH = newsLimit > 0 ? 3 : 6;
   const companies = [];
   try {
     for (let i = 0; i < POPULAR_TICKERS.length; i += BATCH) {
       const part = await Promise.all(POPULAR_TICKERS.slice(i, i + BATCH).map(buildOne));
       companies.push(...part);
-      if (i + BATCH < POPULAR_TICKERS.length) await delay(500);
+      if (i + BATCH < POPULAR_TICKERS.length) await delay(newsLimit > 0 ? 400 : 150);
     }
-    const result = { count: companies.length, symbols: POPULAR_TICKERS, generatedAt: new Date().toISOString(), companies };
-    cacheSet(ck, result);
+    const result = {
+      count: companies.length,
+      symbols: POPULAR_TICKERS,
+      generatedAt: new Date().toISOString(),
+      companies,
+    };
+    cache.set(ck, result);
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: "Failed to build companies overview", error: err.message });
@@ -333,26 +344,15 @@ const getCompaniesWithNews = async (req, res) => {
 };
 
 // ── GET /api/research/market-sentiment ───────────────────────────────────────
-// Reuses the cached general feed — zero extra Finnhub calls
 const getMarketSentiment = async (req, res) => {
   try {
-    // Try to use already-cached feed first
-    let articles = cacheGet("general-feed") || [];
-
-    if (articles.length === 0) {
-      try {
-        const { data } = await axios.get(
-          `${FINNHUB_BASE}/news?category=general&token=${FINNHUB_API_KEY}`,
-          { timeout: 15000 }
-        );
-        articles = Array.isArray(data) ? data : [];
-        // Don't cache here — let getNews handle that
-      } catch (e) {
-        console.warn("[research] sentiment news fetch:", e.response?.status || e.message);
-      }
+    let articles = [];
+    try {
+      articles = await getGeneralNewsFeed();
+    } catch (e) {
+      console.warn("[research] sentiment news fetch:", e.response?.status || e.message);
     }
 
-    // Always return something useful, even with 0 articles
     const totalItems   = Math.max(articles.length, 1);
     const bullishCount = Math.floor(totalItems * 0.55);
     const bearishCount = Math.floor(totalItems * 0.2);
@@ -369,16 +369,12 @@ const getMarketSentiment = async (req, res) => {
       top_topics: ["Fed Rates", "AI Stocks", "Earnings Season", "M&A Activity"],
     });
   } catch (err) {
-    // Never 500 — always return a valid shape
     console.error("[research] getMarketSentiment error:", err.message);
     return res.json({
       total_articles_analyzed: 0,
       overall_sentiment: "neutral",
-      bullish_percent: 45,
-      bearish_percent: 25,
-      neutral_percent: 30,
-      sentiment_score: 0.1,
-      market_mood: "Data Unavailable",
+      bullish_percent: 45, bearish_percent: 25, neutral_percent: 30,
+      sentiment_score: 0.1, market_mood: "Data Unavailable",
       top_topics: ["Market Watch", "Earnings Season", "Fed Policy", "Tech Sector"],
     });
   }
@@ -386,8 +382,9 @@ const getMarketSentiment = async (req, res) => {
 
 // ── GET /api/research/sector-performance ─────────────────────────────────────
 const getSectorPerformance = async (req, res) => {
-  const cached = cacheGet("sector-perf");
-  if (cached) return res.json(cached);
+  const ck = "sector-perf";
+  const hit = cache.get(ck, cache.TTL.SECTOR);
+  if (hit) return res.json(hit);
 
   const sectors = [
     { name: "Technology",  symbol: "XLK"  },
@@ -401,25 +398,18 @@ const getSectorPerformance = async (req, res) => {
   ];
 
   try {
-    const results = [];
-    for (const s of sectors) {
-      try {
-        const { data } = await axios.get(
-          `${FINNHUB_BASE}/quote?symbol=${s.symbol}&token=${FINNHUB_API_KEY}`,
-          { timeout: 10000 }
-        );
-        results.push({
-          name: s.name, symbol: s.symbol,
-          current: data.c, change: data.d,
-          change_percent: data.dp, open: data.o,
-          high: data.h, low: data.l,
-        });
-      } catch {
-        results.push({ name: s.name, symbol: s.symbol, current: 0, change: 0, change_percent: 0 });
-      }
-      await delay(250); // sequential with gap
-    }
-    cacheSet("sector-perf", results);
+    // Fetch all sector ETF quotes in parallel (only 8 calls, low risk of 429)
+    const results = await Promise.all(
+      sectors.map((s) =>
+        finnhubFetch(`/quote?symbol=${s.symbol}`, s.symbol)
+          .then((data) => data
+            ? { name: s.name, symbol: s.symbol, current: data.c, change: data.d, change_percent: data.dp, open: data.o, high: data.h, low: data.l }
+            : { name: s.name, symbol: s.symbol, current: 0, change: 0, change_percent: 0 }
+          )
+          .catch(() => ({ name: s.name, symbol: s.symbol, current: 0, change: 0, change_percent: 0 }))
+      )
+    );
+    cache.set(ck, results);
     res.json(results);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch sector data", error: err.message });

@@ -2,6 +2,7 @@
 // Replaces fake random trust scores with real source-reputation + recency + cross-validation scoring
 
 const axios = require('axios');
+const cache = require('../config/cache');
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const FINNHUB_BASE    = 'https://finnhub.io/api/v1';
@@ -126,14 +127,21 @@ function computeTrustScore(article) {
 // Fetches latest general news and returns each article with real trust scores
 const getTrustScoredFeed = async (req, res) => {
   try {
-    const { data } = await axios.get(
-      `${FINNHUB_BASE}/news?category=general&token=${FINNHUB_API_KEY}`,
-      { timeout: 15000 }
-    );
+    const ck = 'trust-scored-feed';
+    const hit = cache.get(ck, cache.TTL.GENERAL_NEWS);
+    if (hit) return res.json(hit);
 
-    const raw = Array.isArray(data) ? data : [];
+    // Try to reuse already-cached general feed first
+    let raw = cache.get('general-feed', cache.TTL.GENERAL_NEWS) || [];
 
-    // Score every article
+    if (!raw.length) {
+      const { data } = await axios.get(
+        `${FINNHUB_BASE}/news?category=general&token=${FINNHUB_API_KEY}`,
+        { timeout: 15000 }
+      );
+      raw = Array.isArray(data) ? data : [];
+    }
+
     const scored = raw
       .filter(a => a?.headline)
       .map(article => {
@@ -150,28 +158,22 @@ const getTrustScoredFeed = async (req, res) => {
           trust_score:   trust.score,
           trust_tier:    trust.tier,
           trust_breakdown: trust.breakdown,
-          sentiment_score: (Math.random() * 2 - 1).toFixed(3), // keep for UI
+          sentiment_score: (Math.random() * 2 - 1).toFixed(3),
         };
       })
-      .sort((a, b) => b.trust_score - a.trust_score); // highest trust first
+      .sort((a, b) => b.trust_score - a.trust_score);
 
-    // Summary stats
-    const avg   = scored.length ? Math.round(scored.reduce((s, a) => s + a.trust_score, 0) / scored.length) : 0;
+    const avg    = scored.length ? Math.round(scored.reduce((s, a) => s + a.trust_score, 0) / scored.length) : 0;
     const high   = scored.filter(a => a.trust_tier === 'High').length;
     const medium = scored.filter(a => a.trust_tier === 'Medium').length;
     const low    = scored.filter(a => a.trust_tier === 'Low' || a.trust_tier === 'Unverified').length;
 
-    res.json({
+    const result = {
       articles: scored,
-      meta: {
-        total: scored.length,
-        avg_trust_score: avg,
-        high_trust: high,
-        medium_trust: medium,
-        low_trust: low,
-        generated_at: new Date().toISOString(),
-      },
-    });
+      meta: { total: scored.length, avg_trust_score: avg, high_trust: high, medium_trust: medium, low_trust: low, generated_at: new Date().toISOString() },
+    };
+    cache.set(ck, result);
+    res.json(result);
   } catch (err) {
     console.error('[trust] getTrustScoredFeed:', err.message);
     res.status(500).json({ message: 'Failed to fetch trust-scored feed', error: err.message });

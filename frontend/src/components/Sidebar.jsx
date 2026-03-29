@@ -3,14 +3,17 @@ import { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard, TrendingUp, Briefcase, Newspaper,
-  LogOut, Activity, Bitcoin, Search, Lightbulb, Target, Shield,
+  LogOut, Activity, Bitcoin, Search, Lightbulb, Target, Shield, Sparkles, BookOpen
 } from 'lucide-react';
 
 const navItems = [
   { to: '/dashboard',       icon: LayoutDashboard, label: 'Dashboard'      },
   { to: '/recommendations', icon: Lightbulb,       label: 'Smart Predictor'},
+    { to: '/summary', icon: Sparkles, label: 'Summary' },
+
   { to: '/market',          icon: TrendingUp,      label: 'Market'         },
   { to: '/portfolio',       icon: Briefcase,       label: 'Portfolio'      },
+    { to: '/research-library', icon: BookOpen, label: 'Research library' },
   { to: '/research',        icon: Newspaper,       label: 'Research Hub'   },
   { to: '/crypto',          icon: Bitcoin,         label: 'Crypto'         },
   { to: '/screener',        icon: Search,          label: 'Screener'       },

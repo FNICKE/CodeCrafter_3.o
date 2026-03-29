@@ -13,6 +13,7 @@ import AlertsCenter from './pages/AlertsCenter';
 import Crypto from './pages/Crypto';
 import Screener from './pages/Screener';
 import Recommendations from './pages/Recommendations';
+import StockSummary from './pages/StockSummary';
 import Stock from './pages/Stock';
 import Home from './pages/Home';
 import TrustFeed from './pages/Trustfeed';
@@ -21,6 +22,9 @@ import Risk from './pages/Riskanalysis';
 import Reports from './pages/Reports';
 import FinanceChatbot from './pages/FinanceChatbot';
 import AIPredictor from './pages/AIPredictor';
+import Summary from './pages/Summary';
+import ResearchLibrary from './pages/ResearchLibrary';
+
 
 // ✅ Import Sidebar
 import Sidebar from './components/Sidebar';
@@ -80,11 +84,15 @@ function AppRoutes() {
       <Route path="/crypto" element={<ProtectedLayout><Crypto /></ProtectedLayout>} />
       <Route path="/screener" element={<ProtectedLayout><Screener /></ProtectedLayout>} />
       <Route path="/recommendations" element={<ProtectedLayout><Recommendations /></ProtectedLayout>} />
+      <Route path="/stock-summary" element={<ProtectedLayout><StockSummary /></ProtectedLayout>} />
       <Route path="/trustfeed" element={<ProtectedLayout><TrustFeed /></ProtectedLayout>} />
       <Route path="/regulatory" element={<ProtectedLayout><Regulatory /></ProtectedLayout>} />
       <Route path="/risk" element={<ProtectedLayout><Risk /></ProtectedLayout>} />
       <Route path="/reports" element={<ProtectedLayout><Reports /></ProtectedLayout>} />
       <Route path="/stock/:symbol?" element={<ProtectedLayout><Stock /></ProtectedLayout>} />
+      <Route path="/summary" element={<ProtectedLayout><Summary /></ProtectedLayout>} />
+      <Route path="/research-library" element={<ProtectedLayout><ResearchLibrary /></ProtectedLayout>} />
+
       <Route 
   path="/ai-advisor" 
   element={

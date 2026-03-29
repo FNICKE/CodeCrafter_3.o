@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import API from '../api';
 import {
   TrendingUp, TrendingDown, ExternalLink, Search,
   ShieldCheck, ShieldX, Minus, ChevronDown, ChevronUp,
-  Zap, BarChart2, Newspaper, RefreshCw, Info,
+  Zap, BarChart2, Newspaper, RefreshCw, Info, Sparkles,
 } from 'lucide-react';
 
 const CSS = `
@@ -302,6 +303,7 @@ function StockCard({ stock, budgetInr, delay = 0 }) {
 }
 
 export default function Recommendations() {
+  const navigate = useNavigate();
   useEffect(() => { injectStyles('sp-styles', CSS); }, []);
 
   const [topStocks,  setTopStocks]  = useState([]);
@@ -381,9 +383,18 @@ export default function Recommendations() {
 
         {/* Search card */}
         <div className="sp-card sp-fade">
-          <div className="sp-card-hdr">
-            <Search size={16} color="var(--blue)" />
-            <span className="sp-card-title">Analyse <em style={{ fontStyle: 'italic', color: 'var(--blue)' }}>Stocks</em></span>
+          <div className="sp-card-hdr" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '.625rem' }}>
+              <Search size={16} color="var(--blue)" />
+              <span className="sp-card-title">Analyse <em style={{ fontStyle: 'italic', color: 'var(--blue)' }}>Stocks</em></span>
+            </div>
+            <button 
+              className="sp-btn-secondary" 
+              style={{ display: 'flex', alignItems: 'center', gap: '.4rem', padding: '.4rem .8rem', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: '.5rem', color: 'var(--text)', cursor: 'pointer', fontSize: '.75rem', fontWeight: 600, transition: 'all .2s' }} 
+              onClick={() => navigate('/stock-summary')}
+            >
+              <Sparkles size={14} color="var(--blue)" /> Stock Summary
+            </button>
           </div>
           <div className="sp-card-body">
             <div className="sp-form-grid">

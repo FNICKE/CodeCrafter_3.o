@@ -1,4 +1,5 @@
 const axios = require("axios");
+const cache = require("../config/cache");
 
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY;
 const GROQ_API_KEY    = process.env.GROQ_API_KEY;
@@ -61,33 +62,44 @@ async function getEnhancedStockData(symbols, budgetInr = 500000) {
 
   for (const symbol of symbols) {
     try {
-      const [quoteRes, newsRes] = await Promise.all([
-        axios.get(`${FINNHUB_BASE}/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`),
-        axios.get(`${FINNHUB_BASE}/company-news?symbol=${symbol}&from=${
-          new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0]
-        }&to=${new Date().toISOString().split("T")[0]}&token=${FINNHUB_API_KEY}`)
-      ]);
+      // Reuse cached quote if available
+      const quoteCk = `quote-${symbol}`;
+      let quoteData = cache.get(quoteCk, cache.TTL.QUOTE);
+      if (!quoteData) {
+        const res = await axios.get(`${FINNHUB_BASE}/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`);
+        quoteData = res.data;
+        cache.set(quoteCk, quoteData);
+      }
 
-      const q = quoteRes.data;
+      // News — short TTL since AI analysis needs freshness
+      const newsCk = `ai-news-${symbol}`;
+      let newsData = cache.get(newsCk, cache.TTL.COMPANY_NEWS);
+      if (!newsData) {
+        const newsRes = await axios.get(
+          `${FINNHUB_BASE}/company-news?symbol=${symbol}&from=${
+            new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0]
+          }&to=${new Date().toISOString().split("T")[0]}&token=${FINNHUB_API_KEY}`
+        );
+        newsData = newsRes.data;
+        cache.set(newsCk, newsData);
+      }
+
+      const q = quoteData;
       const priceUSD = q.c || 0;
       const priceINR = +(priceUSD * USD_TO_INR).toFixed(2);
-      const rawSentiment = newsRes.data.reduce((sum, n) => sum + analyzeSentiment(n.headline), 0);
+      const rawSentiment = newsData.reduce((sum, n) => sum + analyzeSentiment(n.headline), 0);
       const sentimentScore = Math.max(-5, Math.min(5, rawSentiment));
       const affordableShares = priceINR > 0 ? Math.floor(budgetInr / priceINR) : 0;
 
       results.push({
-        symbol,
-        priceUSD,
-        priceINR,
+        symbol, priceUSD, priceINR,
         changePercent: +(q.dp || 0).toFixed(2),
-        high52w: q.h || null,
-        low52w:  q.l || null,
-        openPrice: q.o || null,
-        prevClose: q.pc || null,
+        high52w: q.h || null, low52w: q.l || null,
+        openPrice: q.o || null, prevClose: q.pc || null,
         sentimentScore,
         sentimentLabel: sentimentLabel(sentimentScore),
-        newsCount: newsRes.data.length,
-        recentHeadlines: newsRes.data.slice(0, 3).map(n => n.headline),
+        newsCount: newsData.length,
+        recentHeadlines: newsData.slice(0, 3).map(n => n.headline),
         affordableShares,
         totalCostINR: +(affordableShares * priceINR).toFixed(2),
         remainingINR: +(budgetInr - affordableShares * priceINR).toFixed(2),

@@ -21,6 +21,8 @@ const regulatoryRoutes = require('./src/routes/regulatoryRoutes');
 const riskRoutes = require('./src/routes/riskRoutes');
 const reportsRoutes = require('./src/routes/reportsRoutes');
 const chatRoutes = require('./src/routes/chatRoutes');
+const summery = require('./src/routes/summary');
+const researchDocsRoutes = require("./src/routes/researchDocs");
 
 const app = express();
 const server = http.createServer(app);
@@ -53,6 +55,8 @@ app.use('/api/risk',riskRoutes);
 app.use('/api/reports',reportsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use("/api/ai", require("./src/routes/aiRoutes"));
+app.use('/api/summary',summery);
+app.use("/api/research-docs", researchDocsRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
