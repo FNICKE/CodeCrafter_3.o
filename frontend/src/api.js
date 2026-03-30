@@ -1,23 +1,36 @@
 import axios from 'axios';
+import NProgress from 'nprogress';
+import 'nprogress/nprogress.css'; // Requires adding nprogress to package.json
+
+// Configure NProgress (the "loader/load balancer" for smooth data fetching)
+NProgress.configure({ showSpinner: false, speed: 400, minimum: 0.2 });
 
 const API = axios.create({
   baseURL: 'http://localhost:5000/api',
   timeout: 12000,
 });
 
-// JWT Token Interceptor
+// JWT Token Interceptor & NProgress Start
 API.interceptors.request.use((config) => {
+  NProgress.start(); // Start the loader smoothly
   const token = localStorage.getItem('hacktrix_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
+}, (error) => {
+  NProgress.done();
+  return Promise.reject(error);
 });
 
-// Response interceptor for auth errors
+// Response interceptor for auth errors & NProgress Done
 API.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    NProgress.done(); // Stop the loader when data is fetched
+    return response;
+  },
   (error) => {
+    NProgress.done(); // Stop the loader on error
     if (error.response?.status === 401) {
       localStorage.removeItem('hacktrix_token');
     }

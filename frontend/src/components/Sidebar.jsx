@@ -13,8 +13,8 @@ const navItems = [
 
   { to: '/market',          icon: TrendingUp,      label: 'Market'         },
   { to: '/portfolio',       icon: Briefcase,       label: 'Portfolio'      },
-    { to: '/research-library', icon: BookOpen, label: 'Research library' },
   { to: '/research',        icon: Newspaper,       label: 'Research Hub'   },
+  { to: '/research-library', icon: BookOpen, label: 'Research library' },
   { to: '/crypto',          icon: Bitcoin,         label: 'Crypto'         },
   { to: '/screener',        icon: Search,          label: 'Screener'       },
   { to: '/ai-advisor',           icon: Target,          label: 'AI Advisor'   },

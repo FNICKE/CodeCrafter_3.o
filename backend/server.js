@@ -38,6 +38,8 @@ const io = new Server(server, {
 app.set("io", io);
 
 // Middleware
+const compression = require("compression");
+app.use(compression({ level: 6 })); // Compress all HTTP responses for faster data loading
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
 

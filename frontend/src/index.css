@@ -373,3 +373,16 @@ html, body {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* NProgress Load Balancer / Loader Custom Styling */
+#nprogress .bar {
+  background: var(--gradient-blue) !important;
+  height: 4px !important;
+}
+#nprogress .peg {
+  box-shadow: 0 0 10px var(--accent-teal), 0 0 5px var(--accent-blue) !important;
+}
+#nprogress .spinner-icon {
+  border-top-color: var(--accent-teal) !important;
+  border-left-color: var(--accent-teal) !important;
+}
