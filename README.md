@@ -156,7 +156,7 @@ The `frontend` directory is statically exportable. Ensure that the build command
 ### Backend (Render/Heroku)
 The Node process tracks the `server.js` file as the main execution loop. Ensure that the proper Node version runtime is supplied. Remember to bind `.env` parameters directly within your SaaS deployment dashboard, particularly securing the `CLIENT_URL` mapping to finalize connection handshake authorizations between the deployed frontend domain and the operational database environment.
 
----
+```
 
 ## Project Structure
 
@@ -187,7 +187,7 @@ CodeCrafter_3.o/
 |   |-- package.json
 |-- README.md           # This file
 
----
+```
 
 ## Future Roadmap
 
